@@ -1,0 +1,11 @@
+.idea/
+.venv/
+__pycache__/
+
+#ignore all the data files
+unfiltered_data/
+filtered_data/
+filtered_sensors_data/
+output/
+sensors_positions/
+trajectories/
