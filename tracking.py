@@ -8,10 +8,7 @@ from kalman_filter import KalmanFilter
 
 # Modified to accept a custom kalman_filters dictionary
 def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold, sensor_frequency,
-                   kalman_filters=None):
-    # Initialize kalman_filters if not provided
-    if kalman_filters is None:
-        kalman_filters = {}
+                   kalman_filters):
 
     delta_time = 1 / sensor_frequency  # Time step in seconds
 
