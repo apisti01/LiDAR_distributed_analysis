@@ -3,12 +3,14 @@ import os
 import numpy as np
 import pandas as pd
 import open3d as o3d
+
+from combining import combine_sensor_kalman_filters
 from sensor_selection import select_sensors
-from data_loader import load_file, load_point_clouds_from_sensors
+from data_loader import load_file
 from transform_coordinates import load_and_transform_scan, calculate_sensors_centroid
 from clustering import dbscan_clustering, create_bounding_boxes, associate_ids_to_bboxes
 from simulation import update_visualization, create_cylinder_between_points
-from tracking import track_vehicles, calculate_threshold, calculate_mse, KalmanFilter
+from tracking import track_vehicles, calculate_threshold, calculate_mse
 
 # Setup paths
 current_directory = os.path.dirname(os.path.abspath(__file__))
@@ -92,55 +94,6 @@ for i in range(20, 71):
 def generate_random_color():
     return np.random.uniform(0, 1, 3)
 
-
-# Function to combine trajectory data from all sensors
-def combine_sensor_trajectories(sensor_trajectories):
-    """
-    Combine trajectory data from all sensors using averaging.
-
-    Args:
-        sensor_trajectories: Dictionary of dictionaries with trajectories by sensor and vehicle
-
-    Returns:
-        Dictionary with combined trajectories for each vehicle
-    """
-    combined = {}
-
-    # Get all unique vehicle IDs across all sensors
-    all_vehicle_ids = set()
-    for sensor_id in sensor_trajectories:
-        all_vehicle_ids.update(sensor_trajectories[sensor_id].keys())
-
-    # For each vehicle, average its position from all sensors that tracked it
-    for vehicle_id in all_vehicle_ids:
-        points_by_frame = {}
-
-        # Collect points from all sensors for this vehicle
-        for sensor_id in sensor_trajectories:
-            if vehicle_id in sensor_trajectories[sensor_id]:
-                for frame_idx, point in enumerate(sensor_trajectories[sensor_id][vehicle_id]):
-                    if frame_idx not in points_by_frame:
-                        points_by_frame[frame_idx] = []
-                    points_by_frame[frame_idx].append(point)
-
-        # Average the points for each frame
-        combined_points = []
-        for frame_idx in sorted(points_by_frame.keys()):
-            if points_by_frame[frame_idx]:
-                # Calculate average point
-                avg_point = np.mean(points_by_frame[frame_idx], axis=0)
-                # Calculate variance if more than one sensor detected this vehicle
-                if len(points_by_frame[frame_idx]) > 1:
-                    variance = np.var(points_by_frame[frame_idx], axis=0)
-                    print(f"Vehicle {vehicle_id}, Frame {frame_idx}: Variance: {variance}")
-                combined_points.append(avg_point)
-
-        if combined_points:
-            combined[vehicle_id] = combined_points
-
-    return combined
-
-
 # Initialize the frame index for saving screenshots
 frame_index = 0
 
@@ -171,7 +124,7 @@ for scan_idx in range(20, 71):
 
         # Downsample the point cloud
         print(f"Number of points before downsampling: {len(pcd.points)}")
-        pcd = pcd.voxel_down_sample(voxel_size=0.2)
+        pcd = pcd.voxel_down_sample(voxel_size=0.2) #TODO find optimal value if any
         print(f"Number of points after downsampling: {len(pcd.points)}")
 
         # Perform DBSCAN clustering
@@ -185,7 +138,7 @@ for scan_idx in range(20, 71):
 
         # Track vehicles using Kalman filter
         if sensor_prev_bbox_centroids[sensor_id]:
-            matches, exited_vehicles, entered_vehicles, predicted_centroids = track_vehicles(
+            matches, exited_vehicles, entered_vehicles, kalman_states = track_vehicles(
                 sensor_prev_bbox_centroids[sensor_id],
                 bbox_centroids,
                 sensor_prev_ids[sensor_id],
@@ -195,14 +148,20 @@ for scan_idx in range(20, 71):
                 sensor_kalman_filters[sensor_id]
             )
 
-            print(f"Sensor {sensor_id} - Matches: {matches}")
-            print(f"Sensor {sensor_id} - Exited vehicles: {exited_vehicles}")
-            print(f"Sensor {sensor_id} - Newly entered vehicles: {entered_vehicles}")
+            if matches:
+                print(f"Sensor {sensor_id} - Matches: {pd.DataFrame(matches)}")
+            if exited_vehicles:
+                print(f"Sensor {sensor_id} - Exited vehicles: {pd.DataFrame(exited_vehicles)}")
+            if entered_vehicles:
+                print(f"Sensor {sensor_id} - Newly entered vehicles: {pd.DataFrame(entered_vehicles)}")
+
+            #TODO create log for exited and entered vehicles and strange matches
+
 
             # Update trajectories for this sensor
             for prev_id, current_id in matches:
                 if current_id in bbox_ids:
-                    current_centroid = bbox_centroids[bbox_ids.index(current_id)]
+                    current_centroid = kalman_states[bbox_ids.index(current_id)]
                     # If the vehicle ID is not in the dictionary, add it
                     if prev_id not in sensor_trajectories[sensor_id]:
                         sensor_trajectories[sensor_id][prev_id] = []
@@ -215,12 +174,12 @@ for scan_idx in range(20, 71):
         sensor_prev_bbox_centroids[sensor_id] = bbox_centroids
 
     # Combine trajectories from all sensors
-    combined_trajectories = combine_sensor_trajectories(sensor_trajectories)
+    combined_trajectories = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors) #TODO adjust max distance if needed
 
-    # Calculate MSE against ground truth trajectories
+    # Calculate MSE against ground truth trajectories todo fix for sensors
     predicted_trajectories_xy = {vehicle_id: [point[:2] for point in points] for vehicle_id, points in
                                  combined_trajectories.items()}
-    calculate_mse(predicted_trajectories_xy, real_trajectories, tracking_threshold, scan_idx - 20)
+    # calculate_mse(predicted_trajectories_xy, real_trajectories, tracking_threshold, scan_idx - 20) # todo move out of the loop
 
     # Save predicted trajectories to CSV
     trajectory_data = []

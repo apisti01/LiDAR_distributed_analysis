@@ -81,7 +81,13 @@ def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold
         if vehicle_id in kalman_filters:
             del kalman_filters[vehicle_id]
 
-    return matches, exited_vehicles, entered_vehicles, predicted_centroids
+    states_of_bbox = []
+    for i, vehicle_id in enumerate(prev_ids):
+        if vehicle_id in kalman_filters:
+            kf = kalman_filters[vehicle_id]
+            states_of_bbox.append(kf.get_state()[:3])
+
+    return matches, exited_vehicles, entered_vehicles, states_of_bbox
 
 
 def compute_velocity(curr_position, predicted_position, delta_time):
@@ -161,86 +167,3 @@ def calculate_mse(predicted_trajectories, real_trajectories, tracking_threshold,
             print(f"No match found for Real ID {real_id}")
 
     return mse_values
-
-
-# New function for associating trajectories from different sensors
-def associate_trajectories(trajectories_dict, threshold):
-    """
-    Associate trajectories from different sensors that likely belong to the same vehicle.
-
-    Args:
-        trajectories_dict: Dictionary of dictionaries {sensor_id: {vehicle_id: trajectory}}
-        threshold: Distance threshold for considering trajectories as the same vehicle
-
-    Returns:
-        Dictionary of associated trajectories with global IDs
-    """
-    # Flatten all trajectories
-    all_trajectories = []
-    for sensor_id, sensor_trajectories in trajectories_dict.items():
-        for vehicle_id, trajectory in sensor_trajectories.items():
-            all_trajectories.append({
-                'sensor_id': sensor_id,
-                'vehicle_id': vehicle_id,
-                'trajectory': trajectory,
-                'start_frame': trajectory[0]['scan'] if trajectory else None,
-                'end_frame': trajectory[-1]['scan'] if trajectory else None
-            })
-
-    # Sort by start frame
-    all_trajectories.sort(key=lambda x: x['start_frame'] if x['start_frame'] is not None else float('inf'))
-
-    # Associate trajectories
-    global_id = 0
-    global_trajectories = {}
-    assigned = set()
-
-    for i, traj1 in enumerate(all_trajectories):
-        if (traj1['sensor_id'], traj1['vehicle_id']) in assigned:
-            continue
-
-        # Create new global trajectory
-        global_trajectories[global_id] = []
-        assigned.add((traj1['sensor_id'], traj1['vehicle_id']))
-
-        # Add points from this trajectory
-        for point in traj1['trajectory']:
-            global_trajectories[global_id].append(point)
-
-        # Check for other trajectories to merge
-        for j, traj2 in enumerate(all_trajectories):
-            if i == j or (traj2['sensor_id'], traj2['vehicle_id']) in assigned:
-                continue
-
-            # Check if trajectories can be merged
-            # Simple logic: if one ends before the other starts and they're spatially close
-            if traj1['end_frame'] < traj2['start_frame']:
-                # traj1 ends before traj2 starts
-                last_point = traj1['trajectory'][-1]['centroid']
-                first_point = traj2['trajectory'][0]['centroid']
-
-                if np.linalg.norm(last_point - first_point) < threshold:
-                    # Merge traj2 into the global trajectory
-                    for point in traj2['trajectory']:
-                        global_trajectories[global_id].append(point)
-                    assigned.add((traj2['sensor_id'], traj2['vehicle_id']))
-
-            elif traj2['end_frame'] < traj1['start_frame']:
-                # traj2 ends before traj1 starts
-                last_point = traj2['trajectory'][-1]['centroid']
-                first_point = traj1['trajectory'][0]['centroid']
-
-                if np.linalg.norm(last_point - first_point) < threshold:
-                    # Merge traj1 into the global trajectory (prepend traj2)
-                    new_points = []
-                    for point in traj2['trajectory']:
-                        new_points.append(point)
-                    new_points.extend(global_trajectories[global_id])
-                    global_trajectories[global_id] = new_points
-                    assigned.add((traj2['sensor_id'], traj2['vehicle_id']))
-
-        # Sort the global trajectory by scan number
-        global_trajectories[global_id].sort(key=lambda x: x['scan'])
-        global_id += 1
-
-    return global_trajectories
