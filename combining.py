@@ -1,9 +1,11 @@
 import numpy as np
+import logging
 from scipy.spatial.distance import cdist
 from scipy.optimize import linear_sum_assignment
 
 from kalman_filter import KalmanFilter
 
+logger = logging.getLogger()
 
 def covariance_intersection(means, covariances):
     """
@@ -213,8 +215,11 @@ def combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors, max_d
 
         # For debugging/reference, store which local tracks were combined
         combined_kf.source_tracks = [(s_id, v_id) for s_id, v_id, _ in track_group]
-        # TODO add log for strange ids
 
+        # Log if vehicle IDs in the group are not all the same
+        v_ids = [v_id for _, v_id, _ in track_group]
+        if len(set(v_ids)) > 1:
+            logger.info(f"Track group {global_vehicle_id} combined different vehicle IDs: {v_ids}")
     return combined_filters
 
 

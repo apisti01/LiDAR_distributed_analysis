@@ -3,6 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 import open3d as o3d
+import logging
 
 from combining import combine_sensor_kalman_filters
 from sensor_selection import select_sensors
@@ -11,6 +12,7 @@ from transform_coordinates import load_and_transform_scan, calculate_sensors_cen
 from clustering import dbscan_clustering, create_bounding_boxes, associate_ids_to_bboxes
 from simulation import update_visualization, create_cylinder_between_points
 from tracking import track_vehicles, calculate_threshold, calculate_mse
+from trajectories_handler import add_new_point_to_trajectories
 
 # Setup paths
 current_directory = os.path.dirname(os.path.abspath(__file__))
@@ -28,9 +30,20 @@ os.makedirs(video_frames_directory, exist_ok=True)
 if os.path.exists(predicted_trajectories_file_path):
     os.remove(predicted_trajectories_file_path)
 
+# Setup logging
+log_file_path = os.path.join(current_directory, 'output/program.log')
+logging.basicConfig(
+    filename=log_file_path,
+    level=logging.INFO,
+    format='%(levelname)s - %(message)s',
+    filemode='w'  # Overwrite the log file each time the program runs
+)
+logger = logging.getLogger()
+
 # Constants
 frequency = 10
 
+'''
 # Choose total number of sensors available
 print("Enter the total number of sensors available: ")
 try:
@@ -40,7 +53,9 @@ except ValueError:
     exit(1)
 
 # Select the sensors to use
-selected_sensors = select_sensors(num_sensors)
+selected_sensors = select_sensors(num_sensors) '''
+# For testing purposes, we can hardcode the selected sensors
+selected_sensors = [0, 1, 2, 3, 4]
 
 # Load the sensors positions
 sensors_positions_df = load_file(sensors_positions_path)
@@ -49,7 +64,7 @@ sensors_positions_df = load_file(sensors_positions_path)
 trajectories_df = load_file(trajectories_path)
 
 # Calculate the threshold for the tracking algorithm
-tracking_threshold = calculate_threshold(trajectories_df, frequency, percentage_margin=25)
+tracking_threshold = calculate_threshold(trajectories_df, frequency, percentage_margin=5000)
 
 # Calculate the centroid of the sensors
 centroid = calculate_sensors_centroid(sensors_positions_df)
@@ -150,14 +165,17 @@ for scan_idx in range(20, 71):
 
             if matches:
                 print(f"Sensor {sensor_id} - Matches: {pd.DataFrame(matches)}")
+                for prev_id, current_id in matches:
+                    if prev_id != current_id:
+                        logger.error(f"Scan: {scan_idx}, Sensor {sensor_id} - {prev_id} != {current_id}")
             if exited_vehicles:
                 print(f"Sensor {sensor_id} - Exited vehicles: {pd.DataFrame(exited_vehicles)}")
+                logger.info(f"Scan: {scan_idx}, Sensor {sensor_id} - Exited vehicles: {exited_vehicles}")
             if entered_vehicles:
                 print(f"Sensor {sensor_id} - Newly entered vehicles: {pd.DataFrame(entered_vehicles)}")
+                logger.info(f"Scan: {scan_idx}, Sensor {sensor_id} - Newly entered vehicles: {entered_vehicles}")
 
-            #TODO create log for exited and entered vehicles and strange matches
-
-
+            '''
             # Update trajectories for this sensor
             for prev_id, current_id in matches:
                 if current_id in bbox_ids:
@@ -168,29 +186,20 @@ for scan_idx in range(20, 71):
 
                     # Append the current centroid to the trajectory
                     sensor_trajectories[sensor_id][prev_id].append(current_centroid)
+            '''
 
         # Update previous IDs and centroids for this sensor
         sensor_prev_ids[sensor_id] = bbox_ids
         sensor_prev_bbox_centroids[sensor_id] = bbox_centroids
 
     # Combine trajectories from all sensors
-    combined_trajectories = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors) #TODO adjust max distance if needed
+    combined_kalman_filters = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors,50 ) #TODO adjust max distance if needed
 
-    # Calculate MSE against ground truth trajectories todo fix for sensors
-    predicted_trajectories_xy = {vehicle_id: [point[:2] for point in points] for vehicle_id, points in
-                                 combined_trajectories.items()}
+    if len(combined_kalman_filters) != 6:
+        logger.warning(f"Scan: {scan_idx}, strange stuff with the vehicles: length is: {len(combined_kalman_filters)}")
+    # Calculate MSE against ground truth trajectories
+    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold)
     # calculate_mse(predicted_trajectories_xy, real_trajectories, tracking_threshold, scan_idx - 20) # todo move out of the loop
-
-    # Save predicted trajectories to CSV
-    trajectory_data = []
-    for vehicle_id, points in combined_trajectories.items():
-        for point in points:
-            trajectory_data.append([scan_idx, vehicle_id, *point])
-
-    if trajectory_data:
-        df_trajectories = pd.DataFrame(trajectory_data, columns=['scan', 'vehicle_id', 'x', 'y', 'z'])
-        header = not os.path.exists(predicted_trajectories_file_path)
-        df_trajectories.to_csv(predicted_trajectories_file_path, mode='a', header=header, index=False)
 
     # ----- Visualization -----
     # Combine all point clouds for visualization
@@ -249,6 +258,7 @@ for scan_idx in range(20, 71):
                     vis_elements.append(cylinder)
 
         # Update visualization
+
         update_visualization(vis, pcd_combined, vis_elements)
 
         # Save screenshot
@@ -257,7 +267,19 @@ for scan_idx in range(20, 71):
         frame_index += 1
 
 
-    time.sleep(0.1)
+
+
+# Save predicted trajectories to CSV
+trajectory_data = []
+for vehicle_id, points in combined_trajectories.items():
+    for n, point in enumerate(points):
+        if point[0] is not np.inf:
+            trajectory_data.append([n + 20, vehicle_id, *point])
+
+if trajectory_data:
+    df_trajectories = pd.DataFrame(trajectory_data, columns=['scan', 'vehicle_id', 'x', 'y'])
+    df_trajectories.to_csv(predicted_trajectories_file_path, mode='a', header=True, index=False)
+
 
 # Close visualization
 vis.destroy_window()
