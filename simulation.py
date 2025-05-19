@@ -10,6 +10,14 @@ def visualize(vis, pcd_combined, bboxes_and_trajectories):
     for bbox in bboxes_and_trajectories:
         vis.add_geometry(bbox)
 
+    view_ctl = vis.get_view_control()
+    view_ctl.set_front([0, -1, 0])
+    view_ctl.set_up([0, 0, 1])
+    view_ctl.set_lookat([0, 0, 0])
+    #view_ctl.set_zoom(0.5)
+
+    vis.get_render_option().show_coordinate_frame = True
+
     # Update the visualization
     vis.poll_events()
     vis.update_renderer()

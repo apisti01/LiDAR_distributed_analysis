@@ -240,7 +240,8 @@ for scan_idx in range(20, 71):
                 # Check if points are 2D or 3D
                 if len(points[0]) == 2:
                     # Convert 2D points to 3D by adding a z coordinate (set to 0)
-                    points_3d = np.hstack((np.asarray(points), np.zeros((len(points), 1))))
+                    points_array = np.asarray(points)
+                    points_3d = np.column_stack((points_array[:, 0], np.zeros(len(points)), -points_array[:, 1]))
                 else:
                     points_3d = np.asarray(points)
 

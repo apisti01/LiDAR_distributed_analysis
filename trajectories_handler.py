@@ -11,12 +11,12 @@ def add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories
             # Initialize the trajectory for this sensor
             combined_trajectories[filter_id] = []
             # Append the initial state to the trajectory
-            combined_trajectories[filter_id].append(kf.get_state()[:2])
+            combined_trajectories[filter_id].append([kf.get_state()[0], -kf.get_state()[2]])
     else:
         # get all the states from the kalman filters
         states = []
         for _, kf in combined_kalman_filters.items():
-            states.append(kf.get_state()[:2])
+            states.append([kf.get_state()[0], -kf.get_state()[2]])
 
         #get last points of the trajectories
         last_points = []
