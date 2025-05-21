@@ -7,6 +7,7 @@ from kalman_filter import KalmanFilter
 
 logger = logging.getLogger()
 
+
 def covariance_intersection(means, covariances):
     """
     Perform covariance intersection for multiple Kalman filters.
@@ -40,7 +41,7 @@ def covariance_intersection(means, covariances):
     for i, (mean, cov) in enumerate(zip(means, covariances)):
         try:
             cov_inv = np.linalg.inv(cov)
-            C_inv +=  cov_inv
+            C_inv += cov_inv
             weighted_mean += np.dot(cov_inv, mean)
         except np.linalg.LinAlgError:
             # Handle singular covariance matrices by slightly increasing diagonal
@@ -91,136 +92,179 @@ def mahalanobis_distance(x1, P1, x2, P2):
     return distance
 
 
-def associate_tracks(sensor_kalman_filters, selected_sensors, max_distance=5.0):
+def create_distance_matrix(filters1, filters2):
     """
-    Associate tracks across multiple sensors based on position.
+    Create a distance matrix between two sets of Kalman filters.
 
     Args:
-        sensor_kalman_filters: Dictionary mapping sensor_id to a dictionary of
-                              {local_vehicle_id: kalman_filter} for each sensor
-        selected_sensors: List of sensor IDs to consider
-        max_distance: Maximum Mahalanobis distance for track association
+        filters1: Dictionary of {vehicle_id: kalman_filter} for first set
+        filters2: Dictionary of {vehicle_id: kalman_filter} for second set
+        max_distance: Maximum allowable distance, beyond which will be set to infinity
 
     Returns:
-        grouped_tracks: List of lists, where each inner list contains tuples of
-                      (sensor_id, local_vehicle_id, kalman_filter) representing
-                      the same physical vehicle across different sensors
+        distance_matrix: 2D numpy array of distances
+        ids1: List of vehicle IDs from filters1 in order
+        ids2: List of vehicle IDs from filters2 in order
     """
-    # Create a flat list of all tracks with their source info
-    all_tracks = []
-    for sensor_id in selected_sensors:
-        if sensor_id in sensor_kalman_filters:
-            for vehicle_id, kf in sensor_kalman_filters[sensor_id].items():
-                all_tracks.append((sensor_id, vehicle_id, kf))
+    ids1 = list(filters1.keys())
+    ids2 = list(filters2.keys())
 
-    # If no tracks, return empty result
-    if not all_tracks:
-        return []
+    n, m = len(ids1), len(ids2)
 
-    # Start with each track in its own group
-    grouped_tracks = [[track] for track in all_tracks]
+    # Initialize distance matrix with infinity
+    distance_matrix = np.full((n, m), np.inf)
 
-    # Iteratively merge groups
-    new_groups = []
+    # Calculate distances between each pair of filters
+    for i, id1 in enumerate(ids1):
+        kf1 = filters1[id1]
+        for j, id2 in enumerate(ids2):
+            kf2 = filters2[id2]
+            distance = mahalanobis_distance(kf1.X, kf1.P, kf2.X, kf2.P)
 
-    while grouped_tracks:
-        current_group = grouped_tracks.pop(0)
+            distance_matrix[i, j] = distance
 
-        i = 0
-        while i < len(grouped_tracks):
-            candidate_group = grouped_tracks[i]
-
-            # Check if these groups can be merged (no sensor overlap and close position)
-            can_merge = True
-            sensor_ids_current = {track[0] for track in current_group}
-            sensor_ids_candidate = {track[0] for track in candidate_group}
-
-            # Cannot merge if same sensor appears in both groups
-            if sensor_ids_current.intersection(sensor_ids_candidate):
-                i += 1
-                continue
-
-            # Check distances between all pairs across groups
-            distance_check_passed = False
-            for track1 in current_group:
-                for track2 in candidate_group:
-                    _, _, kf1 = track1
-                    _, _, kf2 = track2
-
-                    # Calculate Mahalanobis distance between state estimates
-                    distance = mahalanobis_distance(kf1.X, kf1.P, kf2.X, kf2.P)
-
-                    if distance <= max_distance:
-                        distance_check_passed = True
-                        break
-
-                if distance_check_passed:
-                    break
-
-            if distance_check_passed:
-                # Merge groups
-                current_group.extend(candidate_group)
-                grouped_tracks.pop(i)
-            else:
-                i += 1
-
-        new_groups.append(current_group)
-
-    return new_groups
+    return distance_matrix, ids1, ids2
 
 
 def combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors, max_distance=5.0):
     """
-    Combine Kalman filters from multiple sensors using covariance intersection,
-    based on position-based track association.
+    Combine Kalman filters from multiple sensors using consecutive application of
+    the Hungarian algorithm with linear sum assignment.
 
     Args:
         sensor_kalman_filters: Dictionary mapping sensor_id to a dictionary of
                               {local_vehicle_id: kalman_filter} for each sensor
-        selected_sensors: List of sensor IDs to consider
+        selected_sensors: List of sensor IDs to consider in order
         max_distance: Maximum Mahalanobis distance for track association
 
     Returns:
         combined_filters: Dictionary mapping global_vehicle_id to combined Kalman filter
     """
-    # Associate tracks based on position
-    grouped_tracks = associate_tracks(sensor_kalman_filters, selected_sensors, max_distance)
+    if len(selected_sensors) < 2:
+        logger.warning("Need at least 2 sensors to perform combination")
+        return {}
 
-    # Combine filters for each group
-    combined_filters = {}
+    # Start with the first sensor's data
+    current_filters = sensor_kalman_filters[selected_sensors[0]]
 
-    for i, track_group in enumerate(grouped_tracks):
-        global_vehicle_id = f"global_vehicle_{i}"
+    # Track the source of each combined filter
+    source_tracks = {v_id: [(selected_sensors[0], v_id)] for v_id in current_filters}
 
-        # Extract means and covariances from each filter in this group
-        means = []
-        covariances = []
+    # Consecutively combine with each additional sensor
+    for i in range(1, len(selected_sensors)):
+        sensor_id = selected_sensors[i]
 
-        for sensor_id, local_vehicle_id, kf in track_group:
-            means.append(kf.X)
-            covariances.append(kf.P)
+        if sensor_id not in sensor_kalman_filters or not sensor_kalman_filters[sensor_id]:
+            logger.warning(f"No data for sensor {sensor_id}, skipping")
+            continue
 
-        # Apply covariance intersection
-        combined_mean, combined_cov = covariance_intersection(means, covariances)
+        next_filters = sensor_kalman_filters[sensor_id]
 
-        # Create a new Kalman filter with the combined state and covariance
-        dt = track_group[0][2].dt  # Use dt from first filter in group
+        # Create distance matrix between current combined filters and next sensor's filters
+        dist_matrix, current_ids, next_ids = create_distance_matrix(
+            current_filters, next_filters)
 
-        combined_kf = KalmanFilter(dt)
-        combined_kf.X = combined_mean
-        combined_kf.P = combined_cov
+        # New set of combined filters after this matching
+        new_filters = {}
+        new_source_tracks = {}
 
-        # Store the combined filter
-        combined_filters[global_vehicle_id] = combined_kf
+        # Track which vehicles from current and next filters have been matched
+        current_matched = set()
+        next_matched = set()
 
-        # For debugging/reference, store which local tracks were combined
-        combined_kf.source_tracks = [(s_id, v_id) for s_id, v_id, _ in track_group]
+        # Apply Hungarian algorithm for optimal assignment
+        if dist_matrix.size > 0:  # Only if there are elements to match
+            try:
+                # The linear_sum_assignment function finds the minimum cost assignment
+                row_indices, col_indices = linear_sum_assignment(dist_matrix)
 
-        # Log if vehicle IDs in the group are not all the same
-        v_ids = [v_id for _, v_id, _ in track_group]
-        if len(set(v_ids)) > 1:
-            logger.info(f"Track group {global_vehicle_id} combined different vehicle IDs: {v_ids}")
-    return combined_filters
+                # Process the matches
+                for row_idx, col_idx in zip(row_indices, col_indices):
+                    if dist_matrix[row_idx, col_idx] > max_distance:
+                        # Skip distant matches
+                        continue
+
+                    current_id = current_ids[row_idx]
+                    next_id = next_ids[col_idx]
+
+                    # Mark these vehicles as matched
+                    current_matched.add(current_id)
+                    next_matched.add(next_id)
+
+                    # Combine the two matched filters using covariance intersection
+                    kf1 = current_filters[current_id]
+                    kf2 = next_filters[next_id]
+
+                    means = [kf1.X, kf2.X]
+                    covariances = [kf1.P, kf2.P]
+
+                    combined_mean, combined_cov = covariance_intersection(means, covariances)
+
+                    # Create a new Kalman filter with combined state
+                    dt = kf1.dt  # Use dt from first filter
+                    global_id = f"combined_{current_id}"
+
+                    combined_kf = KalmanFilter(dt)
+                    combined_kf.X = combined_mean
+                    combined_kf.P = combined_cov
+
+                    # Update the combined filters dictionary
+                    new_filters[global_id] = combined_kf
+
+                    # Track the source of this combined filter
+                    new_source_tracks[global_id] = source_tracks[current_id] + [(sensor_id, next_id)]
+
+            except ValueError as e:
+                logger.error(f"Error in linear_sum_assignment: {e}")
+
+        # Add unmatched vehicles from current filters
+        for current_id in current_ids:
+            if current_id not in current_matched:
+                global_id = f"unmatched_{current_id}"
+                new_filters[global_id] = current_filters[current_id]
+                new_source_tracks[global_id] = source_tracks[current_id]
+
+        # Add unmatched vehicles from next sensor
+        for next_id in next_ids:
+            if next_id not in next_matched:
+                global_id = f"unmatched_sensor{i}_{next_id}"
+                new_filters[global_id] = next_filters[next_id]
+                new_source_tracks[global_id] = [(sensor_id, next_id)]
+
+        # Update current filters for next iteration
+        current_filters = new_filters
+        source_tracks = new_source_tracks
+
+        # If no filters are left, stop processing
+        if not current_filters:
+            logger.warning(f"No filters left after combining with sensor {sensor_id}")
+            return {}
+
+    # Create the final combined filters with proper global IDs - only keep vehicles seen by multiple sensors
+    final_filters = {}
+    filter_counter = 0
+
+    for filter_id, kf in current_filters.items():
+        # Check if this vehicle was seen by at least two different sensors
+        sensors_seen = set(sensor_id for sensor_id, _ in source_tracks[filter_id])
+
+        if len(sensors_seen) >= 2:
+            global_vehicle_id = f"global_vehicle_{filter_counter}"
+            filter_counter += 1
+
+            final_filters[global_vehicle_id] = kf
+
+            # Store source tracks for reference
+            kf.source_tracks = source_tracks[filter_id]
+
+            # Log if vehicle IDs in the group are not all the same
+            v_ids = [v_id for _, v_id in source_tracks[filter_id]]
+            if len(set(v_ids)) > 1:
+                logger.error(f"Track group {global_vehicle_id} combined different vehicle IDs: {v_ids}")
+            if len(v_ids) < 4:
+                logger.warning(f"Track group {global_vehicle_id} has fewer than 4 vehicle IDs: {v_ids}")
+
+    return final_filters
 
 
 # Example usage
@@ -255,7 +299,7 @@ if __name__ == "__main__":
     # Vehicle at position (5, 40, 0) - seen only by sensor2 as "Y"
     sensor_kalman_filters["sensor2"]["Y"].update(np.array([5, 40, 0]))
 
-    # Combine the filters
+    # Combine the filters using the consecutive Hungarian algorithm approach
     combined_filters = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors)
 
     # Print results

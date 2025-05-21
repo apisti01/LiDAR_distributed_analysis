@@ -64,7 +64,7 @@ sensors_positions_df = load_file(sensors_positions_path)
 trajectories_df = load_file(trajectories_path)
 
 # Calculate the threshold for the tracking algorithm
-tracking_threshold = calculate_threshold(trajectories_df, frequency, percentage_margin=5000)
+tracking_threshold = calculate_threshold(trajectories_df, frequency, percentage_margin=50)
 
 # Calculate the centroid of the sensors
 centroid = calculate_sensors_centroid(sensors_positions_df)
@@ -193,12 +193,12 @@ for scan_idx in range(20, 71):
         sensor_prev_bbox_centroids[sensor_id] = bbox_centroids
 
     # Combine trajectories from all sensors
-    combined_kalman_filters = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors,50 ) #TODO adjust max distance if needed
+    combined_kalman_filters = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors,25 ) #TODO adjust max distance if needed
 
     if len(combined_kalman_filters) != 6:
         logger.warning(f"Scan: {scan_idx}, strange stuff with the vehicles: length is: {len(combined_kalman_filters)}")
     # Calculate MSE against ground truth trajectories
-    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold)
+    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold * 10)
     # calculate_mse(predicted_trajectories_xy, real_trajectories, tracking_threshold, scan_idx - 20) # todo move out of the loop
 
     # ----- Visualization -----
