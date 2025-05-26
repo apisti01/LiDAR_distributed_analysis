@@ -21,6 +21,7 @@ sensors_positions_path = os.path.join(current_directory, 'sensors_positions/pitt
 trajectories_path = os.path.join(current_directory, 'trajectories/pitt_trajectories.csv')
 predicted_trajectories_file_path = os.path.join(current_directory, 'output/predicted_trajectories.csv')
 video_frames_directory = os.path.join(current_directory, 'output/video_frames')
+sensor_trajectory_file_path = os.path.join(current_directory, 'output/sensor_trajectories.csv')
 
 # Ensure output directories exist
 os.makedirs(os.path.dirname(predicted_trajectories_file_path), exist_ok=True)
@@ -64,7 +65,7 @@ sensors_positions_df = load_file(sensors_positions_path)
 trajectories_df = load_file(trajectories_path)
 
 # Calculate the threshold for the tracking algorithm
-tracking_threshold = calculate_threshold(trajectories_df, frequency, percentage_margin=50)
+tracking_threshold = calculate_threshold(trajectories_df, frequency, percentage_margin=100)
 
 # Calculate the centroid of the sensors
 centroid = calculate_sensors_centroid(sensors_positions_df)
@@ -175,7 +176,7 @@ for scan_idx in range(20, 71):
                 print(f"Sensor {sensor_id} - Newly entered vehicles: {pd.DataFrame(entered_vehicles)}")
                 logger.info(f"Scan: {scan_idx}, Sensor {sensor_id} - Newly entered vehicles: {entered_vehicles}")
 
-            '''
+
             # Update trajectories for this sensor
             for prev_id, current_id in matches:
                 if current_id in bbox_ids:
@@ -186,19 +187,19 @@ for scan_idx in range(20, 71):
 
                     # Append the current centroid to the trajectory
                     sensor_trajectories[sensor_id][prev_id].append(current_centroid)
-            '''
+
 
         # Update previous IDs and centroids for this sensor
         sensor_prev_ids[sensor_id] = bbox_ids
         sensor_prev_bbox_centroids[sensor_id] = bbox_centroids
 
     # Combine trajectories from all sensors
-    combined_kalman_filters = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors,25 ) #TODO adjust max distance if needed
+    combined_kalman_filters = combine_sensor_kalman_filters(sensor_kalman_filters, selected_sensors,30 ) #TODO adjust max distance if needed
 
     if len(combined_kalman_filters) != 6:
         logger.warning(f"Scan: {scan_idx}, strange stuff with the vehicles: length is: {len(combined_kalman_filters)}")
     # Calculate MSE against ground truth trajectories
-    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold * 10)
+    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold * 5)
     # calculate_mse(predicted_trajectories_xy, real_trajectories, tracking_threshold, scan_idx - 20) # todo move out of the loop
 
     # ----- Visualization -----
@@ -280,6 +281,24 @@ for vehicle_id, points in combined_trajectories.items():
 if trajectory_data:
     df_trajectories = pd.DataFrame(trajectory_data, columns=['scan', 'vehicle_id', 'x', 'y'])
     df_trajectories.to_csv(predicted_trajectories_file_path, mode='a', header=True, index=False)
+
+# Save sensor trajectories to CSV
+sensor_trajectory_data = []
+
+for sensor_id, trajectories in sensor_trajectories.items():
+    for vehicle_id, points in trajectories.items():
+        for scan_num, point in enumerate(points):
+            # Check if the point contains valid data
+            if point[0] is not np.inf:
+                # Add sensor_id, vehicle_id, scan number, and position coordinates
+                sensor_trajectory_data.append([sensor_id, vehicle_id, scan_num + 20, point[0], point[1], point[2]])
+
+if sensor_trajectory_data:
+    df_sensor_trajectories = pd.DataFrame(
+        sensor_trajectory_data,
+        columns=['sensor_id', 'vehicle_id', 'scan', 'x', 'y', 'z']
+    )
+    df_sensor_trajectories.to_csv(sensor_trajectory_file_path, index=False)
 
 
 # Close visualization

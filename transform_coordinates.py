@@ -1,3 +1,12 @@
+"""
+Note to the user:
+when the input data of the rotations of the sensor is:
+90, 0, 0
+such as the data which the code is built on,
+the vehicles will float in the air on the y axis.
+as such the rest of the code will be adjusted to consider the correct coordinates ( for example the trajectories will consider only the x and z coordinates)
+(also the original code is not mine and, for some reason unknown to me, if you don't rotate the points, it doesn't work correctly)
+"""
 import os
 import numpy as np
 

@@ -65,6 +65,11 @@ def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold
     exited_vehicles = [prev_ids[i] for i in unmatched_prev]
     entered_vehicles = [curr_ids[i] for i in unmatched_curr]
 
+    # Remove Kalman filters for exited vehicles
+    for vehicle_id in exited_vehicles:
+        if vehicle_id in kalman_filters:
+            del kalman_filters[vehicle_id]
+
     # Initialize Kalman filters for new vehicles
     for vehicle_id in entered_vehicles:
         if vehicle_id in curr_ids:  # Make sure it exists in curr_ids
@@ -76,16 +81,14 @@ def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold
             kf.X[5:] = np.zeros(2)  # Initial acceleration [ax, ay]
             kalman_filters[vehicle_id] = kf
 
-    # Remove Kalman filters for exited vehicles
-    for vehicle_id in exited_vehicles:
-        if vehicle_id in kalman_filters:
-            del kalman_filters[vehicle_id]
-
     states_of_bbox = []
-    for i, vehicle_id in enumerate(prev_ids):
+    for i, vehicle_id in enumerate(curr_ids):
         if vehicle_id in kalman_filters:
             kf = kalman_filters[vehicle_id]
             states_of_bbox.append(kf.get_state()[:3])
+        else:
+            #Handle the rare cases of a mismatch on an exited vehicle
+            states_of_bbox.append([np.inf, np.inf, np.inf])  # Placeholder
 
     return matches, exited_vehicles, entered_vehicles, states_of_bbox
 
