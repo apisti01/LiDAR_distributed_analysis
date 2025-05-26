@@ -200,7 +200,6 @@ for scan_idx in range(20, 71):
         logger.warning(f"Scan: {scan_idx}, strange stuff with the vehicles: length is: {len(combined_kalman_filters)}")
     # Calculate MSE against ground truth trajectories
     add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold * 5)
-    # calculate_mse(predicted_trajectories_xy, real_trajectories, tracking_threshold, scan_idx - 20) # todo move out of the loop
 
     # ----- Visualization -----
     # Combine all point clouds for visualization
@@ -269,7 +268,10 @@ for scan_idx in range(20, 71):
         frame_index += 1
 
 
-
+# Calculate MSE for the combined trajectories
+mses = calculate_mse(real_trajectories, combined_trajectories)
+print(f"MSE values: {mses}")
+logger.info(f"MSE values: {mses}")
 
 # Save predicted trajectories to CSV
 trajectory_data = []
