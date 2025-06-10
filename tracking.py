@@ -256,5 +256,286 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
     # Calculate overall average MSE
     overall_mse = np.mean(list(mse_values.values())) if mse_values else 0
     print(f"Overall average MSE across all matched trajectories: {overall_mse:.4f}")
+    logger.info(f"Overall average MSE across all matched trajectories: {overall_mse:.4f}")
 
-    return mse_values
+    return mse_values, avg_frame_mse
+
+def compare_mses(real_trajectories, sensor_trajectories, selected_sensors, combined_mses, combined_avg_frame_mse,
+                 num_frames=30):
+    """
+    Compare MSE between real trajectories and individual sensor trajectories.
+    Calculate cardinality errors and trajectory matching for each sensor.
+
+    Args:
+        real_trajectories: Dictionary of real trajectories {vehicle_id: [position_points]}
+        sensor_trajectories: Dictionary of sensor trajectories {sensor_id: {vehicle_id: [position_points]}}
+        selected_sensors: List of sensor IDs to analyze
+        combined_mses: MSE values from combined trajectories for comparison
+        combined_avg_frame_mse: Average frame MSE from combined trajectories
+        num_frames: Number of frames to analyze
+    """
+
+    print("\n=== SENSOR-WISE MSE COMPARISON ===")
+    logger.info("=== SENSOR-WISE MSE COMPARISON ===")
+
+    sensor_results = {}
+    all_sensor_avg_mses = []
+
+    # Create figure for comparison plots
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    fig.suptitle('Sensor-wise MSE Analysis', fontsize=16)
+
+    for sensor_id in selected_sensors:
+        print(f"\n--- Processing Sensor {sensor_id} ---")
+        logger.info(f"--- Processing Sensor {sensor_id} ---")
+
+        if sensor_id not in sensor_trajectories or not sensor_trajectories[sensor_id]:
+            print(f"No trajectories found for sensor {sensor_id}")
+            logger.warning(f"No trajectories found for sensor {sensor_id}")
+            continue
+
+        sensor_traj = {vehicle_id: [[point[0], -point[2]] for point in trajectory] for vehicle_id, trajectory in sensor_trajectories[sensor_id].items()}
+
+        # Extract valid trajectory IDs
+        real_ids = [id for id, traj in real_trajectories.items() if len(traj) > 0]
+        sensor_ids = [id for id, traj in sensor_traj.items() if len(traj) > 0]
+
+        # Calculate cardinality error
+        cardinality_error = abs(len(real_ids) - len(sensor_ids))
+        print(f"Sensor {sensor_id} - Real trajectories: {len(real_ids)}, Sensor trajectories: {len(sensor_ids)}")
+        print(f"Sensor {sensor_id} - Cardinality error: {cardinality_error}")
+        logger.info(f"Sensor {sensor_id} - Cardinality error: {cardinality_error}")
+
+        if not real_ids or not sensor_ids:
+            print(f"No valid trajectories to compare for sensor {sensor_id}")
+            continue
+
+        # Get first points from each trajectory for initial matching
+        real_first_points = [real_trajectories[id][20] for id in real_ids]
+        sensor_first_points = [sensor_traj[id][0] for id in sensor_ids]
+
+        # Create distance matrix between first points
+        distance_matrix = compute_distance_matrix(real_first_points, sensor_first_points)
+
+        # Use linear sum assignment to find optimal matching
+        row_ind, col_ind = linear_sum_assignment(distance_matrix)
+
+        # Calculate MSE for matched trajectories
+        sensor_mse_values = {}
+        sensor_frame_mse = {i: [] for i in range(num_frames)}
+        sensor_mse_per_frame = {}
+        trajectory_lengths = {}
+        early_termination_count = 0
+        catastrophic_failures_sensor = 0
+
+        for r, c in zip(row_ind, col_ind):
+            real_id = real_ids[r]
+            sensor_vehicle_id = sensor_ids[c]
+
+            real_traj = real_trajectories[real_id]
+            sensor_vehicle_traj = sensor_traj[sensor_vehicle_id]
+
+            sensor_mse_per_frame[real_id] = []
+
+            # Track trajectory lengths
+            real_length = len(real_traj)-20
+            sensor_length = len(sensor_vehicle_traj)
+            trajectory_lengths[real_id] = {
+                'real': real_length,
+                'sensor': sensor_length,
+                'min_length': min(real_length, sensor_length)
+            }
+
+            # Check for early termination
+            if sensor_length < real_length:
+                early_termination_count += 1
+                print(
+                    f"Sensor {sensor_id} - Vehicle {real_id}: Early termination (sensor: {sensor_length}, real: {real_length})")
+                logger.warning(f"Sensor {sensor_id} - Vehicle {real_id}: Early termination")
+
+            # Calculate MSE for overlapping frames
+            overlapping_frames = 0
+            catastrophic_failures = 0
+            for frame in range(num_frames):
+
+                if frame < len(real_traj)-20 and frame < len(sensor_vehicle_traj):
+                    real_point = np.array(real_traj[frame+20])  # Use only x, y coordinates
+                    sensor_point = np.array(sensor_vehicle_traj[frame])  # Use only x, y coordinates
+
+                    if sensor_point[0] < 999999:
+                        squared_error = np.sum((real_point - sensor_point) ** 2)
+                        sensor_mse_per_frame[real_id].append(squared_error)
+                        sensor_frame_mse[frame].append(squared_error)
+                        overlapping_frames += 1
+                    else:
+                        catastrophic_failures += 1
+
+            if sensor_mse_per_frame[real_id]:
+                avg_mse = np.mean(sensor_mse_per_frame[real_id])
+                sensor_mse_values[(real_id, sensor_vehicle_id)] = avg_mse
+                print(
+                    f"Sensor {sensor_id} - Matched Real ID {real_id} with Sensor Vehicle ID {sensor_vehicle_id} - Avg MSE: {avg_mse:.4f} ({overlapping_frames} frames) - Catastrophic failures: {catastrophic_failures}")
+                logger.info(
+                    f"Sensor {sensor_id} - Matched Real ID {real_id} with Sensor Vehicle ID {sensor_vehicle_id} - Avg MSE: {avg_mse:.4f} ({overlapping_frames} frames) - Catastrophic failures: {catastrophic_failures}")
+
+            catastrophic_failures_sensor += catastrophic_failures
+
+        # Calculate average MSE per frame for this sensor
+        sensor_avg_frame_mse = [np.mean(errors) if errors else 0 for frame, errors in
+                                sorted(sensor_frame_mse.items())]
+
+        # Calculate overall statistics for this sensor
+        if sensor_mse_values:
+            sensor_overall_mse = np.mean(list(sensor_mse_values.values()))
+            all_sensor_avg_mses.append(sensor_overall_mse)
+        else:
+            sensor_overall_mse = float('inf')
+
+        # Store results
+        sensor_results[sensor_id] = {
+            'mse_values': sensor_mse_values,
+            'avg_frame_mse': sensor_avg_frame_mse,
+            'overall_mse': sensor_overall_mse,
+            'cardinality_error': cardinality_error,
+            'early_terminations': early_termination_count,
+            'trajectory_lengths': trajectory_lengths,
+            'num_matched': len(sensor_mse_values),
+            'catastrophic_failures': catastrophic_failures_sensor
+        }
+
+        print(f"Sensor {sensor_id} - Overall MSE: {sensor_overall_mse:.4f}")
+        print(f"Sensor {sensor_id} - Early terminations: {early_termination_count}")
+        logger.info(
+            f"Sensor {sensor_id} - Overall MSE: {sensor_overall_mse:.4f}, Early terminations: {early_termination_count}, Catastrophic failures: {catastrophic_failures_sensor}")
+
+    # Create comparison plots
+
+    # Plot 1: Overall MSE comparison
+    ax1 = axes[0, 0]
+    sensor_ids_plot = []
+    sensor_mses_plot = []
+
+    for sensor_id in selected_sensors:
+        if sensor_id in sensor_results and sensor_results[sensor_id]['overall_mse'] != float('inf'):
+            sensor_ids_plot.append(f"Sensor {sensor_id}")
+            sensor_mses_plot.append(sensor_results[sensor_id]['overall_mse'])
+
+    # Add combined MSE for comparison
+    if combined_mses:
+        combined_overall_mse = np.mean(list(combined_mses.values()))
+        sensor_ids_plot.append("Combined")
+        sensor_mses_plot.append(combined_overall_mse)
+
+    ax1.bar(sensor_ids_plot, sensor_mses_plot,
+            color=['lightblue' if 'Sensor' in x else 'orange' for x in sensor_ids_plot])
+    ax1.set_title('Overall MSE Comparison')
+    ax1.set_ylabel('Average MSE')
+    ax1.tick_params(axis='x', rotation=45)
+
+    # Plot 2: Cardinality errors
+    ax2 = axes[0, 1]
+    cardinality_errors = [sensor_results[sid]['cardinality_error'] for sid in selected_sensors if
+                          sid in sensor_results]
+    sensor_labels = [f"Sensor {sid}" for sid in selected_sensors if sid in sensor_results]
+
+    ax2.bar(sensor_labels, cardinality_errors, color='lightcoral')
+    ax2.set_title('Cardinality Errors by Sensor')
+    ax2.set_ylabel('Number of Missing/Extra Trajectories')
+    ax2.tick_params(axis='x', rotation=45)
+
+    # Plot 3: Frame-by-frame MSE comparison
+    ax3 = axes[1, 0]
+    for sensor_id in selected_sensors:
+        if sensor_id in sensor_results and sensor_results[sensor_id]['avg_frame_mse']:
+            ax3.plot(range(len(sensor_results[sensor_id]['avg_frame_mse'])),
+                     sensor_results[sensor_id]['avg_frame_mse'],
+                     marker='o', label=f'Sensor {sensor_id}', alpha=0.7)
+
+    if combined_avg_frame_mse:
+        ax3.plot(range(len(combined_avg_frame_mse)), combined_avg_frame_mse,
+                 marker='s', linewidth=3, label='Combined', color='black')
+
+    ax3.set_title('MSE per Frame Comparison')
+    ax3.set_xlabel('Frame Number')
+    ax3.set_ylabel('Average MSE')
+    ax3.legend()
+    ax3.grid(True)
+
+    # Plot 4: Early termination statistics
+    ax4 = axes[1, 1]
+    early_term_counts = [sensor_results[sid]['early_terminations'] for sid in selected_sensors if
+                         sid in sensor_results]
+
+    ax4.bar(sensor_labels, early_term_counts, color='lightyellow')
+    ax4.set_title('Early Termination Count by Sensor')
+    ax4.set_ylabel('Number of Early Terminations')
+    ax4.tick_params(axis='x', rotation=45)
+
+    plt.tight_layout()
+    plt.savefig('output/sensor_comparison_analysis.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+    # Print summary statistics
+    print("\n=== SUMMARY STATISTICS ===")
+    logger.info("=== SUMMARY STATISTICS ===")
+
+    if all_sensor_avg_mses:
+        best_sensor_mse = min(all_sensor_avg_mses)
+        worst_sensor_mse = max(all_sensor_avg_mses)
+        avg_sensor_mse = np.mean(all_sensor_avg_mses)
+
+        print(f"Best individual sensor MSE: {best_sensor_mse:.4f}")
+        print(f"Worst individual sensor MSE: {worst_sensor_mse:.4f}")
+        print(f"Average individual sensor MSE: {avg_sensor_mse:.4f}")
+
+        if combined_mses:
+            combined_overall_mse = np.mean(list(combined_mses.values()))
+            print(f"Combined approach MSE: {combined_overall_mse:.4f}")
+
+            improvement_over_avg = ((avg_sensor_mse - combined_overall_mse) / avg_sensor_mse) * 100
+            improvement_over_best = ((best_sensor_mse - combined_overall_mse) / best_sensor_mse) * 100
+
+            print(f"Combined approach improvement over average sensor: {improvement_over_avg:.2f}%")
+            print(f"Combined approach improvement over best sensor: {improvement_over_best:.2f}%")
+
+            logger.info(
+                f"Combined approach improvement: {improvement_over_avg:.2f}% over average, {improvement_over_best:.2f}% over best")
+
+    # Print detailed results for each sensor
+    for sensor_id, results in sensor_results.items():
+        print(f"\nSensor {sensor_id} detailed results:")
+        print(f"  - Matched trajectories: {results['num_matched']}")
+        print(f"  - Overall MSE: {results['overall_mse']:.4f}")
+        print(f"  - Cardinality error: {results['cardinality_error']}")
+        print(f"  - Early terminations: {results['early_terminations']}")
+
+        # Print trajectory length statistics
+        if results['trajectory_lengths']:
+            avg_real_length = np.mean([info['real'] for info in results['trajectory_lengths'].values()])
+            avg_sensor_length = np.mean([info['sensor'] for info in results['trajectory_lengths'].values()])
+            avg_overlap = np.mean([info['min_length'] for info in results['trajectory_lengths'].values()])
+
+            print(f"  - Average real trajectory length: {avg_real_length:.1f}")
+            print(f"  - Average sensor trajectory length: {avg_sensor_length:.1f}")
+            print(f"  - Average overlap length: {avg_overlap:.1f}")
+
+    # Log detailed results for each sensor
+    for sensor_id, results in sensor_results.items():
+        logger.info(f"Sensor {sensor_id} detailed results:")
+        logger.info(f"  - Matched trajectories: {results['num_matched']}")
+        logger.info(f"  - Overall MSE: {results['overall_mse']:.4f}")
+        logger.info(f"  - Cardinality error: {results['cardinality_error']}")
+        logger.info(f"  - Early terminations: {results['early_terminations']}")
+        logger.info(f"  - Catastrophic failures: {results['catastrophic_failures']}")
+
+        # Log trajectory length statistics
+        if results['trajectory_lengths']:
+            avg_real_length = np.mean([info['real'] for info in results['trajectory_lengths'].values()])
+            avg_sensor_length = np.mean([info['sensor'] for info in results['trajectory_lengths'].values()])
+            avg_overlap = np.mean([info['min_length'] for info in results['trajectory_lengths'].values()])
+
+            logger.info(f"  - Average real trajectory length: {avg_real_length:.1f}")
+            logger.info(f"  - Average sensor trajectory length: {avg_sensor_length:.1f}")
+            logger.info(f"  - Average overlap length: {avg_overlap:.1f}")
+
+    return sensor_results

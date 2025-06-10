@@ -11,7 +11,7 @@ from data_loader import load_file
 from transform_coordinates import load_and_transform_scan, calculate_sensors_centroid
 from clustering import dbscan_clustering, create_bounding_boxes, associate_ids_to_bboxes
 from simulation import update_visualization, create_cylinder_between_points
-from tracking import track_vehicles, calculate_threshold, calculate_mse
+from tracking import track_vehicles, calculate_threshold, calculate_mse, compare_mses
 from trajectories_handler import add_new_point_to_trajectories
 
 # Setup paths
@@ -269,9 +269,10 @@ for scan_idx in range(20, 71):
 
 
 # Calculate MSE for the combined trajectories
-mses = calculate_mse(real_trajectories, combined_trajectories)
+mses, avg_frame_mse = calculate_mse(real_trajectories, combined_trajectories)
 print(f"MSE values: {mses}")
 logger.info(f"MSE values: {mses}")
+compare_mses(real_trajectories, sensor_trajectories, selected_sensors, mses, avg_frame_mse)
 
 # Save predicted trajectories to CSV
 trajectory_data = []
