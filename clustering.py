@@ -64,7 +64,9 @@ def dbscan_clustering(pcd, scan_number, eps=None, min_points=10, plot_k_distance
     print(f"Davies-Bouldin Index: {db_index}")
     print(f"Calinski-Harabasz Index: {ch_index}\n")
 
-    return clusters, labels
+    indexes = [silhouette_avg, db_index, ch_index]
+
+    return clusters, labels, indexes
 
 
 def create_bounding_boxes(clusters, scan_number):

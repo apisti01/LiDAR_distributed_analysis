@@ -86,6 +86,10 @@ sensor_prev_bbox_centroids = {sensor_id: [] for sensor_id in selected_sensors}
 combined_trajectories = {}
 tracked_speeds = {}
 
+# dictionary to store indexes of clustering
+cluster_indexes = {sensor_id: [[], [], []] for sensor_id in selected_sensors}
+cluster_gen_ind = [[], [], []]  # Silhouette Score, Davies-Bouldin Index, Calinski-Harabasz Index
+
 # Dictionary to store vehicle colors
 vehicle_colors = {}
 
@@ -162,7 +166,10 @@ for scan_idx in range(20, 71):
         print(f"Number of points after downsampling: {len(pcd.points)}")
 
         # Perform DBSCAN clustering
-        clusters, labels = dbscan_clustering(pcd, scan_idx)
+        clusters, labels, indexes = dbscan_clustering(pcd, scan_idx)
+        cluster_indexes[sensor_id][0].append(indexes[0])  # Silhouette Score
+        cluster_indexes[sensor_id][1].append(indexes[1])  # Davies-Bouldin Index
+        cluster_indexes[sensor_id][2].append(indexes[2])  # Calinski-Harabasz Index
 
         # Create bounding boxes
         bounding_boxes, bbox_centroids = create_bounding_boxes(clusters, scan_idx)
@@ -246,7 +253,10 @@ for scan_idx in range(20, 71):
         vis_elements = []
 
         # Get clusters for visualization (reuse clustering code)
-        clusters, _ = dbscan_clustering(pcd_combined, scan_idx)
+        clusters, _, indexes = dbscan_clustering(pcd_combined, scan_idx)
+        cluster_gen_ind[0].append(indexes[0])  # Silhouette Score
+        cluster_gen_ind[1].append(indexes[1])  # Davies-Bouldin Index
+        cluster_gen_ind[2].append(indexes[2])  # Calinski-Harabasz Index
         bboxes, _ = create_bounding_boxes(clusters, scan_idx)
         vis_elements.extend(bboxes)
 
@@ -291,6 +301,30 @@ mses, avg_frame_mse = calculate_mse(real_trajectories, combined_trajectories, tr
 print(f"MSE values: {mses}")
 logger.info(f"MSE values: {mses}")
 compare_mses(real_trajectories, sensor_trajectories, selected_sensors, mses, avg_frame_mse)
+
+# Print average clustering indexes for each sensor
+for sensor_id in selected_sensors:
+    if sensor_id in cluster_indexes:
+        avg = np.mean(cluster_indexes[sensor_id][0])
+        print(f"Sensor {sensor_id} - Average Silhouette Score: {avg}")
+        logger.info(f"Sensor {sensor_id} - Average Silhouette Score: {avg}")
+        avg = np.mean(cluster_indexes[sensor_id][1])
+        print(f"Sensor {sensor_id} - Average Davies-Bouldin Index: {avg}")
+        logger.info(f"Sensor {sensor_id} - Average Davies-Bouldin Index: {avg}")
+        avg = np.mean(cluster_indexes[sensor_id][2])
+        print(f"Sensor {sensor_id} - Average Calinski-Harabasz Index: {avg}")
+        logger.info(f"Sensor {sensor_id} - Average Calinski-Harabasz Index: {avg}")
+
+# Print average clustering indexes for the entire dataset
+avg = np.mean(cluster_gen_ind[0])
+print(f"Overall - Average Silhouette Score: {avg}")
+logger.info(f"Overall - Average Silhouette Score: {avg}")
+avg = np.mean(cluster_gen_ind[1])
+print(f"Overall - Average Davies-Bouldin Index: {avg}")
+logger.info(f"Overall - Average Davies-Bouldin Index: {avg}")
+avg = np.mean(cluster_gen_ind[2])
+print(f"Overall - Average Calinski-Harabasz Index: {avg}")
+logger.info(f"Overall - Average Calinski-Harabasz Index: {avg}")
 
 # Save predicted trajectories to CSV
 trajectory_data = []
