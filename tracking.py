@@ -20,8 +20,8 @@ def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold
             kf = KalmanFilter(delta_time)
             # Initialize with the previous position and zero velocity/acceleration
             kf.X[:3] = prev_centroids[prev_ids.index(vehicle_id)]  # Initial position [x, y, z]
-            kf.X[3:5] = np.zeros(2)  # Initial velocity [vx, vy]
-            kf.X[5:] = np.zeros(2)  # Initial acceleration [ax, ay]
+            kf.X[3:6] = np.zeros(3)  # Initial velocity [vx, vy, vz]
+            kf.X[6:] = np.zeros(3)  # Initial acceleration [ax, ay, az]
             kalman_filters[vehicle_id] = kf
 
     # Predict the next position of each vehicle using Kalman Filter
@@ -53,15 +53,15 @@ def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold
             kf = kalman_filters[prev_ids[r]]
             prev_pos = prev_centroids[r]
             curr_pos = curr_centroids[c]
-            prev_velocity = kf.X[3:5]
+            prev_velocity = kf.X[3:6]
             curr_velocity = compute_velocity(prev_pos, curr_pos, delta_time)
             acceleration = compute_acceleration(prev_velocity, curr_velocity, delta_time)
 
             # Update the Kalman filter with the actual measurement
             kf.update(curr_pos)
             # Update velocity and acceleration in the Kalman filter's state vector
-            kf.X[3:5] = curr_velocity
-            kf.X[5:] = acceleration
+            kf.X[3:6] = curr_velocity
+            kf.X[6:] = acceleration
 
     # Handle unmatched vehicles
     exited_vehicles = [prev_ids[i] for i in unmatched_prev]
@@ -79,8 +79,8 @@ def track_vehicles(prev_centroids, curr_centroids, prev_ids, curr_ids, threshold
             curr_pos = curr_centroids[idx]
             kf = KalmanFilter(delta_time)
             kf.X[:3] = curr_pos  # Set the initial position [x, y, z]
-            kf.X[3:5] = np.zeros(2)  # Initial velocity [vx, vy]
-            kf.X[5:] = np.zeros(2)  # Initial acceleration [ax, ay]
+            kf.X[3:6] = np.zeros(3)  # Initial velocity [vx, vy, vz]
+            kf.X[6:] = np.zeros(3)  # Initial acceleration [ax, ay, az]
             kalman_filters[vehicle_id] = kf
 
     states_of_bbox = []
@@ -101,7 +101,8 @@ def compute_velocity(curr_position, predicted_position, delta_time):
     """
     vx = (predicted_position[0] - curr_position[0]) / delta_time
     vy = (predicted_position[1] - curr_position[1]) / delta_time
-    return np.array([vx, vy])
+    vz = (predicted_position[2] - curr_position[2]) / delta_time
+    return np.array([vx, vy, vz])
 
 
 def compute_acceleration(curr_velocity, predicted_velocity, delta_time):
@@ -110,7 +111,8 @@ def compute_acceleration(curr_velocity, predicted_velocity, delta_time):
     """
     ax = (predicted_velocity[0] - curr_velocity[0]) / delta_time
     ay = (predicted_velocity[1] - curr_velocity[1]) / delta_time
-    return np.array([ax, ay])
+    az = (predicted_velocity[2] - curr_velocity[2]) / delta_time
+    return np.array([ax, ay, az])
 
 
 def compute_distance_matrix(prev_boxes, curr_boxes):

@@ -198,7 +198,7 @@ for scan_idx in range(20, 71):
 
     if len(combined_kalman_filters) != 6:
         logger.warning(f"Scan: {scan_idx}, strange stuff with the vehicles: length is: {len(combined_kalman_filters)}")
-    # Calculate MSE against ground truth trajectories
+
     add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold * 5)
 
     # ----- Visualization -----
