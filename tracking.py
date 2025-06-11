@@ -234,7 +234,7 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
     plt.ylabel('Average MSE')
     plt.grid(True)
     plt.savefig('output/mse_per_frame.png')
-    plt.show()
+    plt.close()
 
 
 
@@ -251,7 +251,7 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.savefig('output/mse_by_vehicle.png')
-        plt.show()
+        plt.close()
 
     # Calculate overall average MSE
     overall_mse = np.mean(list(mse_values.values())) if mse_values else 0
@@ -281,9 +281,6 @@ def compare_mses(real_trajectories, sensor_trajectories, selected_sensors, combi
     sensor_results = {}
     all_sensor_avg_mses = []
 
-    # Create figure for comparison plots
-    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-    fig.suptitle('Sensor-wise MSE Analysis', fontsize=16)
 
     for sensor_id in selected_sensors:
         print(f"\n--- Processing Sensor {sensor_id} ---")
@@ -411,7 +408,7 @@ def compare_mses(real_trajectories, sensor_trajectories, selected_sensors, combi
     # Create comparison plots
 
     # Plot 1: Overall MSE comparison
-    ax1 = axes[0, 0]
+    plt.figure(figsize=(10, 6))
     sensor_ids_plot = []
     sensor_mses_plot = []
 
@@ -426,54 +423,36 @@ def compare_mses(real_trajectories, sensor_trajectories, selected_sensors, combi
         sensor_ids_plot.append("Combined")
         sensor_mses_plot.append(combined_overall_mse)
 
-    ax1.bar(sensor_ids_plot, sensor_mses_plot,
+    plt.bar(sensor_ids_plot, sensor_mses_plot,
             color=['lightblue' if 'Sensor' in x else 'orange' for x in sensor_ids_plot])
-    ax1.set_title('Overall MSE Comparison')
-    ax1.set_ylabel('Average MSE')
-    ax1.tick_params(axis='x', rotation=45)
+    plt.title('Overall MSE Comparison')
+    plt.ylabel('Average MSE')
+    plt.tick_params(axis='x', rotation=45)
+    plt.tight_layout()
+    plt.savefig('output/overall_mse_comparison.png', dpi=300, bbox_inches='tight')
+    plt.close()
 
-    # Plot 2: Cardinality errors
-    ax2 = axes[0, 1]
-    cardinality_errors = [sensor_results[sid]['cardinality_error'] for sid in selected_sensors if
-                          sid in sensor_results]
-    sensor_labels = [f"Sensor {sid}" for sid in selected_sensors if sid in sensor_results]
-
-    ax2.bar(sensor_labels, cardinality_errors, color='lightcoral')
-    ax2.set_title('Cardinality Errors by Sensor')
-    ax2.set_ylabel('Number of Missing/Extra Trajectories')
-    ax2.tick_params(axis='x', rotation=45)
-
-    # Plot 3: Frame-by-frame MSE comparison
-    ax3 = axes[1, 0]
+    # Plot 2: Frame-by-frame MSE comparison
+    plt.figure(figsize=(12, 6))
     for sensor_id in selected_sensors:
         if sensor_id in sensor_results and sensor_results[sensor_id]['avg_frame_mse']:
-            ax3.plot(range(len(sensor_results[sensor_id]['avg_frame_mse'])),
+            plt.plot(range(len(sensor_results[sensor_id]['avg_frame_mse'])),
                      sensor_results[sensor_id]['avg_frame_mse'],
                      marker='o', label=f'Sensor {sensor_id}', alpha=0.7)
 
     if combined_avg_frame_mse:
-        ax3.plot(range(len(combined_avg_frame_mse)), combined_avg_frame_mse,
+        plt.plot(range(len(combined_avg_frame_mse)), combined_avg_frame_mse,
                  marker='s', linewidth=3, label='Combined', color='black')
 
-    ax3.set_title('MSE per Frame Comparison')
-    ax3.set_xlabel('Frame Number')
-    ax3.set_ylabel('Average MSE')
-    ax3.legend()
-    ax3.grid(True)
-
-    # Plot 4: Early termination statistics
-    ax4 = axes[1, 1]
-    early_term_counts = [sensor_results[sid]['early_terminations'] for sid in selected_sensors if
-                         sid in sensor_results]
-
-    ax4.bar(sensor_labels, early_term_counts, color='lightyellow')
-    ax4.set_title('Early Termination Count by Sensor')
-    ax4.set_ylabel('Number of Early Terminations')
-    ax4.tick_params(axis='x', rotation=45)
-
+    plt.title('MSE per Frame Comparison')
+    plt.xlabel('Frame Number')
+    plt.ylabel('Average MSE')
+    plt.legend()
+    plt.grid(True)
     plt.tight_layout()
-    plt.savefig('output/sensor_comparison_analysis.png', dpi=300, bbox_inches='tight')
-    plt.show()
+    plt.savefig('output/frame_mse_comparison.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
 
     # Print summary statistics
     print("\n=== SUMMARY STATISTICS ===")
