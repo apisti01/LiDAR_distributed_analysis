@@ -3,20 +3,24 @@ from scipy.optimize import linear_sum_assignment
 
 from tracking import compute_distance_matrix
 
-def add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, threshold):
+def add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracked_speeds, threshold):
 
     if not combined_trajectories:
         # if first iteration and trajectories empty, initialize them with first state
         for filter_id, kf in combined_kalman_filters.items():
             # Initialize the trajectory for this sensor
             combined_trajectories[filter_id] = []
+            tracked_speeds[filter_id] = []
             # Append the initial state to the trajectory
             combined_trajectories[filter_id].append([kf.get_state()[0], -kf.get_state()[2]])
+            tracked_speeds[filter_id].append([kf.get_velocity()[0], -kf.get_velocity()[2]])
     else:
         # get all the states from the kalman filters
         states = []
+        speeds = []
         for _, kf in combined_kalman_filters.items():
             states.append([kf.get_state()[0], -kf.get_state()[2]])
+            speeds.append([kf.get_velocity()[0], -kf.get_velocity()[2]])
 
         #get last points of the trajectories
         last_points = []
@@ -37,6 +41,7 @@ def add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories
                 unmatched_curr.discard(c)
 
                 combined_trajectories[list(combined_trajectories.keys())[r]].append(states[c])
+                tracked_speeds[list(combined_trajectories.keys())[r]].append(speeds[c])
 
         # Handle unmatched vehicles
         for i in unmatched_curr:
@@ -51,11 +56,14 @@ def add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories
             # Create new trajectory with unique name
             combined_trajectories[name] = []
             combined_trajectories[name].append(states[i])
+            tracked_speeds[name] = []
+            tracked_speeds[name].append(speeds[i])
 
         for i in unmatched_prev:
             # If the vehicle is not in the current states, makes it infinity so it doesn't match in the future
             if i in combined_trajectories:
                 combined_trajectories[list(combined_trajectories.keys())[i]].append([inf, inf])
+                tracked_speeds[list(combined_trajectories.keys())[i]].append([inf, inf])
 
         print("entered vehicles:", len(unmatched_curr))
         print("exited vehicles:", len(unmatched_prev))

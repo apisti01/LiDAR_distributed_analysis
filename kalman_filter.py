@@ -54,3 +54,7 @@ class KalmanFilter:
     def get_state(self):
         # Return the current state: position x, y, z
         return self.X[:3]
+
+    def get_velocity(self):
+        # Return the current velocity: vx, vy, vz
+        return self.X[3:6]

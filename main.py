@@ -84,6 +84,7 @@ sensor_prev_bbox_centroids = {sensor_id: [] for sensor_id in selected_sensors}
 
 # Dictionary to store combined trajectories after merging data from all sensors
 combined_trajectories = {}
+tracked_speeds = {}
 
 # Dictionary to store vehicle colors
 vehicle_colors = {}
@@ -104,6 +105,23 @@ for i in range(20, 71):
             real_trajectories[vehicle_id] = [transformed_point]  # Start a list for this vehicle
         else:
             real_trajectories[vehicle_id].append(transformed_point)  # Append the point
+
+#Load the real speed from trajectories_df
+real_speeds = {}
+for i in range(20, 71):
+    # Filter the trajectories for the current timestep
+    current_trajectories = trajectories_df[trajectories_df['time'] == i-20]
+    for _, row in current_trajectories.iterrows():
+        vehicle_id = int(row['label']) if row['label'] != 'AV' else -1
+        point = [row['vx'], row['vy']]
+
+        # Transform the trajectory point
+        transformed_point = np.array(point)
+        # Check if this vehicle_id already exists in the dictionary
+        if vehicle_id not in real_speeds:
+            real_speeds[vehicle_id] = [transformed_point]  # Start a list for this vehicle
+        else:
+            real_speeds[vehicle_id].append(transformed_point)  # Append the point
 
 
 # Function to generate a random color
@@ -199,7 +217,7 @@ for scan_idx in range(20, 71):
     if len(combined_kalman_filters) != 6:
         logger.warning(f"Scan: {scan_idx}, strange stuff with the vehicles: length is: {len(combined_kalman_filters)}")
 
-    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracking_threshold * 5)
+    add_new_point_to_trajectories(combined_kalman_filters, combined_trajectories, tracked_speeds, tracking_threshold * 5)
 
     # ----- Visualization -----
     # Combine all point clouds for visualization
@@ -269,7 +287,7 @@ for scan_idx in range(20, 71):
 
 
 # Calculate MSE for the combined trajectories
-mses, avg_frame_mse = calculate_mse(real_trajectories, combined_trajectories)
+mses, avg_frame_mse = calculate_mse(real_trajectories, combined_trajectories, tracked_speeds, real_speeds)
 print(f"MSE values: {mses}")
 logger.info(f"MSE values: {mses}")
 compare_mses(real_trajectories, sensor_trajectories, selected_sensors, mses, avg_frame_mse)

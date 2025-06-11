@@ -133,7 +133,7 @@ def calculate_threshold(df, sensor_frequency, percentage_margin):
     return threshold + threshold * (percentage_margin / 100)
 
 
-def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
+def calculate_mse(real_trajectories, combined_trajectories, tracked_speeds, real_speeds, num_frames=30):
     """
     Calculate MSE between real and combined trajectories using linear sum assignment
     for trajectory matching and evaluate over multiple frames.
@@ -169,6 +169,8 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
     mse_values = {}
     frame_mse = {i: [] for i in range(num_frames)}
     mse_per_frame = {}
+    mse_speed_per_frame = {}
+    mse_speed_tot = []
 
     # Process matches based on assignment
     for r, c in zip(row_ind, col_ind):
@@ -177,18 +179,25 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
 
         matched_ids[real_id] = pred_id
         mse_per_frame[real_id] = []
+        mse_speed_per_frame[real_id] = []
 
         real_traj = real_trajectories[real_id]
         pred_traj = combined_trajectories[pred_id]
+        real_speed = real_speeds[real_id]
+        pred_speed = tracked_speeds[pred_id]
 
         # Calculate MSE for each frame (up to num_frames)
         for frame in range(num_frames):
             if frame < len(real_traj)-20 and frame < len(pred_traj):
                 real_point = np.array(real_traj[frame+20])
                 pred_point = np.array(pred_traj[frame])
+                real_speed_point = np.array(real_speed[frame+20])
+                pred_speed_point = np.array(pred_speed[frame])
 
                 squared_error = np.sum((real_point - pred_point) ** 2)
+                speed_error = np.sum((real_speed_point - pred_speed_point) ** 2)
                 mse_per_frame[real_id].append(squared_error)
+                mse_speed_per_frame[real_id].append(speed_error)
                 frame_mse[frame].append(squared_error)
 
         if mse_per_frame[real_id]:
@@ -196,6 +205,11 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
             mse_values[(real_id, pred_id)] = avg_mse
             print(f"Matched Real ID {real_id} with Predicted ID {pred_id} - Avg MSE: {avg_mse:.4f}")
             logger.info(f"Matched Real ID {real_id} with Predicted ID {pred_id} - Avg MSE: {avg_mse:.4f}")
+
+            avg_mse = np.mean(mse_speed_per_frame[real_id])
+            mse_speed_tot.append(avg_mse)
+            print(f" Id {real_id} - Avg Speed MSE: {avg_mse:.4f}")
+            logger.info(f" Id {real_id} - Avg Speed MSE: {avg_mse:.4f}")
         else:
             print(f"No overlapping frames for Real ID {real_id} and Predicted ID {pred_id}")
             logger.warning(f"No overlapping frames for Real ID {real_id} and Predicted ID {pred_id}")
@@ -203,6 +217,10 @@ def calculate_mse(real_trajectories, combined_trajectories, num_frames=30):
     # Calculate average MSE per frame
     avg_frame_mse = [np.mean(errors) if errors else 0 for frame, errors in sorted(frame_mse.items())]
 
+    #tot speed error
+    avg = np.mean(mse_speed_tot) if mse_speed_tot else 0
+    print(f"Average Speed MSE across all matched trajectories: {avg:.4f}")
+    logger.info(f"Average Speed MSE across all matched trajectories: {avg:.4f}")
 
 
     # Plot individual MSE per frame for each vehicle pair
